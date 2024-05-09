@@ -1,8 +1,9 @@
-use super::{APIError, APIResponse, Generation, NAME, VERSION};
+use super::{Generation, NAME, VERSION};
 use custom_types::llm_ls::{Backend, Ide};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use tracing::{error, info};
 use std::fmt::Display;
 
 use crate::error::{Error, Result};
@@ -43,6 +44,19 @@ fn parse_api_text(text: &str) -> Result<Vec<Generation>> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct LlamaCppGeneration {
+    content: String,
+}
+
+impl From<LlamaCppGeneration> for Generation {
+    fn from(value: LlamaCppGeneration) -> Self {
+        Generation {
+            generated_text: value.content,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct OllamaGeneration {
     response: String,
 }
@@ -58,6 +72,7 @@ impl From<OllamaGeneration> for Generation {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum OllamaAPIResponse {
+    LlamaCppGeneration(LlamaCppGeneration),
     Generation(OllamaGeneration),
     Error(APIError),
 }
@@ -68,6 +83,7 @@ fn build_ollama_headers() -> HeaderMap {
 
 fn parse_ollama_text(text: &str) -> Result<Vec<Generation>> {
     match serde_json::from_str(text)? {
+        OllamaAPIResponse::LlamaCppGeneration(gen) => Ok(vec![gen.into()]),
         OllamaAPIResponse::Generation(gen) => Ok(vec![gen.into()]),
         OllamaAPIResponse::Error(err) => Err(Error::Ollama(err)),
     }
@@ -171,6 +187,7 @@ pub(crate) fn build_body(
             request_body.insert("prompt".to_owned(), Value::String(prompt));
             request_body.insert("model".to_owned(), Value::String(model));
             request_body.insert("stream".to_owned(), Value::Bool(false));
+            request_body.insert("n_predict".to_owned(), json!(32));
         }
     };
     request_body
