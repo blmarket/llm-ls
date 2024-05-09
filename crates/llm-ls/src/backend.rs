@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::fmt::Display;
 
-use crate::{error::{Error, Result}, APIError, APIResponse};
+use crate::{
+    error::{Error, Result},
+    APIError, APIResponse,
+};
 
 fn build_tgi_headers(api_token: Option<&String>, ide: Ide) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
