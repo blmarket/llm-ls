@@ -3,8 +3,8 @@ use custom_types::llm_ls::{Backend, Ide};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use tracing::{error, info};
 use std::fmt::Display;
+use tracing::{error, info};
 
 use crate::error::{Error, Result};
 
