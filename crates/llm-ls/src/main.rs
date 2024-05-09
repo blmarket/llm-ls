@@ -1,8 +1,9 @@
 use clap::Parser;
 use custom_types::llm_ls::{
     AcceptCompletionParams, Backend, Completion, FimParams, GetCompletionsParams,
-    GetCompletionsResult, Ide, TokenizerConfig,
+    GetCompletionsResult, Ide, RejectCompletionParams, TokenizerConfig,
 };
+use llm_daemon::{LlamaConfig, LlamaDaemon, LlmDaemon, MlcConfig, MlcDaemon, Proxy, ProxyConfig};
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -574,7 +575,7 @@ impl LlmService {
         Ok(())
     }
 
-    async fn reject_completion(&self, rejected: AcceptCompletionParams) -> LspResult<()> {
+    async fn reject_completion(&self, rejected: RejectCompletionParams) -> LspResult<()> {
         info!(
             request_id = %rejected.request_id,
             shown_completions = serde_json::to_string(&rejected.shown_completions).map_err(internal_error)?,
@@ -700,8 +701,7 @@ struct Args {
     stdio: bool,
 }
 
-#[tokio::main]
-async fn main() {
+async fn async_main() {
     let args = Args::parse();
 
     let home_dir = home::home_dir().ok_or(()).expect("failed to find home dir");
@@ -714,6 +714,7 @@ async fn main() {
     let builder = tracing_subscriber::fmt()
         .with_writer(log_file)
         .with_target(true)
+        .with_file(true)
         .with_line_number(true)
         .with_env_filter(
             EnvFilter::try_from_env("LLM_LOG_LEVEL").unwrap_or_else(|_| EnvFilter::new("warn")),
@@ -725,6 +726,11 @@ async fn main() {
         .with_current_span(false)
         .with_span_list(true)
         .init();
+
+    debug!(
+        log_level = std::env::var("LLM_LOG_LEVEL").ok(),
+        "Executed with log level"
+    );
 
     let http_client = reqwest::Client::new();
     let unsafe_http_client = reqwest::Client::builder()
@@ -766,4 +772,19 @@ async fn main() {
         let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
         Server::new(stdin, stdout, socket).serve(service).await;
     }
+}
+
+fn main() {
+    let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-2b-Q5_K_M.gguf");
+    let daemon = LlamaDaemon::from(model_path);
+    // let daemon = Proxy::new(ProxyConfig::default(), LlamaDaemon::new(LlamaConfig::default()));
+    // let daemon = LlamaDaemon::new(LlamaConfig {
+    //     port: 8282,
+    //     ..LlamaConfig::default()
+    // });
+    daemon.fork_daemon().expect("failed to fork a daemon");
+    let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+    let handle = runtime.spawn(daemon.heartbeat());
+    runtime.block_on(async_main());
+    handle.abort();
 }
