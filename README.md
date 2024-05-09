@@ -1,6 +1,8 @@
 # llm-ls - with daemonized backend
 
-This is a fork of [llm-ls](https://github.com/huggingface/llm-ls) with daemonized backend.
+This is a drop-in replacement of
+[llm-ls](https://github.com/huggingface/llm-ls)
+with LLM daemon launching in a daemonized process.
 
 ## What is daemonized backend?
 
@@ -16,13 +18,19 @@ You wanna run ollama (or other API endpoint) on your own? really?
 
 ## Configuration
 
-Modify [server/model location](https://github.com/blmarket/llm-ls/blob/main/crates/llama-daemon/src/daemon.rs#L30-L33) in the source code, and build llm-ls in release mode.
+Modify [server/model
+location](https://github.com/blmarket/llm-ls/blob/main/crates/llama-daemon/src/daemon.rs#L30-L33)
+in the source code, and build llm-ls in release mode.
 
 Use following extensions to use compiled LSP server.
 
 ### llm-nvim
 
 I'm using lazy.nvim, but it should also work with other plugin managers.
+
+Note that current llm-daemon host a daemon with a port calculated from a hash,
+which means you may need to set your own port number. (you can find port number
+from /tmp/llm-{}.sock)
 
 ```lua
 local M = {
