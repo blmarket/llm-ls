@@ -3,7 +3,7 @@ use custom_types::llm_ls::{
     AcceptCompletionParams, Backend, Completion, FimParams, GetCompletionsParams,
     GetCompletionsResult, Ide, RejectCompletionParams, TokenizerConfig,
 };
-use llm_daemon::{LlamaConfig, LlamaDaemon, LlmDaemon, MlcConfig, MlcDaemon, Proxy, ProxyConfig};
+use llm_daemon::{LlamaDaemon, LlmDaemon};
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -155,12 +155,6 @@ impl From<RequestParams> for APIParams {
             return_full_text: false,
         }
     }
-}
-
-#[derive(Serialize)]
-struct APIRequest {
-    inputs: String,
-    parameters: APIParams,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

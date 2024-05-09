@@ -4,9 +4,8 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::fmt::Display;
-use tracing::{error, info};
 
-use crate::error::{Error, Result};
+use crate::{error::{Error, Result}, APIError, APIResponse};
 
 fn build_tgi_headers(api_token: Option<&String>, ide: Ide) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
