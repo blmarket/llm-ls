@@ -769,7 +769,8 @@ async fn async_main() {
 }
 
 fn main() {
-    let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-2b-Q5_K_M.gguf");
+    // let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-2b-Q5_K_M.gguf");
+    let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
     let daemon = LlamaDaemon::from(model_path);
     // let daemon = Proxy::new(ProxyConfig::default(), LlamaDaemon::new(LlamaConfig::default()));
     // let daemon = LlamaDaemon::new(LlamaConfig {
