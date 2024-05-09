@@ -1,45 +1,58 @@
-# llm-ls
+# llm-ls - with daemonized backend
 
-> [!IMPORTANT]
-> This is currently a work in progress, expect things to be broken!
+This is a fork of [llm-ls](https://github.com/huggingface/llm-ls) with daemonized backend.
 
-**llm-ls** is a LSP server leveraging LLMs to make your development experience smoother and more efficient.
+## What is daemonized backend?
 
-The goal of llm-ls is to provide a common platform for IDE extensions to be build on. llm-ls takes care of the heavy lifting with regards to interacting with LLMs so that extension code can be as lightweight as possible.
+The LSP server spawns a LLM server in a forked process and let it run
+indefinitely, eliminating the need for a user to launch another server such as
+ollama etc.
 
-## Features
+Currently it requires llama.cpp to be installed on the system.
 
-### Prompt
+## Why daemonized backend?
 
-Uses the current file as context to generate the prompt. Can use "fill in the middle" or not depending on your needs.
+You wanna run ollama (or other API endpoint) on your own? really?
 
-It also makes sure that you are within the context window of the model by tokenizing the prompt.
+## Configuration
 
-### Telemetry
+Modify [server/model location](https://github.com/blmarket/llm-ls/blob/main/crates/llama-daemon/src/daemon.rs#L30-L33) in the source code, and build llm-ls in release mode.
 
-Gathers information about requests and completions that can enable retraining.
+Use following extensions to use compiled LSP server.
 
-Note that **llm-ls** does not export any data anywhere (other than setting a user agent when querying the model API), everything is stored in a log file (`~/.cache/llm_ls/llm-ls.log`) if you set the log level to `info`.
+### llm-nvim
 
-### Completion
+I'm using lazy.nvim, but it should also work with other plugin managers.
 
-**llm-ls** parses the AST of the code to determine if completions should be multi line, single line or empty (no completion).
+```lua
+local M = {
+  'huggingface/llm.nvim',
+  opts = {
+    backend = "ollama",
+    url = "http://127.0.0.1:8080/completion",
+    lsp = {
+      bin_path = vim.fn.expand("$HOME/proj/llm-ls/target/release/llm-ls"),
+      version = "0.5.2",
+    },
+    fim = {
+      enabled = false,
+    },
+    context_window = 2048,
+    enable_suggestions_on_startup = true,
+  },
+}
 
-### Multiple backends
+return M
+```
 
-**llm-ls** is compatible with Hugging Face's [Inference API](https://huggingface.co/docs/api-inference/en/index), Hugging Face's [text-generation-inference](https://github.com/huggingface/text-generation-inference), [ollama](https://github.com/ollama/ollama) and OpenAI compatible APIs, like the [python llama.cpp server bindings](https://github.com/abetlen/llama-cpp-python?tab=readme-ov-file#openai-compatible-web-server).
+### llm-vscode
 
-## Compatible extensions
-
-- [x] [llm.nvim](https://github.com/huggingface/llm.nvim)
-- [x] [llm-vscode](https://github.com/huggingface/llm-vscode)
-- [x] [llm-intellij](https://github.com/huggingface/llm-intellij)
-- [ ] [jupytercoder](https://github.com/bigcode-project/jupytercoder)
-
-## Roadmap
-
-- support getting context from multiple files in the workspace
-- add `suffix_percent` setting that determines the ratio of # of tokens for the prefix vs the suffix in the prompt
-- add context window fill percent or change context_window to `max_tokens`
-- filter bad suggestions (repetitive, same as below, etc)
-- oltp traces ?
+```json
+    "llm.lsp.binaryPath": "/home/blmarket/proj/llm-ls/target/release/llm-ls",
+    "llm.backend": "ollama",
+    "llm.url": "http://127.0.0.1:8080/completion",
+    "llm.fillInTheMiddle.enabled": true,
+    "llm.fillInTheMiddle.prefix": "<PRE> ",
+    "llm.fillInTheMiddle.middle": " <MID>",
+    "llm.fillInTheMiddle.suffix": " <SUF>",
+```
