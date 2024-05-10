@@ -309,6 +309,7 @@ async fn request_completion(
     let headers = build_headers(&params.backend, params.api_token.as_ref(), params.ide)?;
 
     let token = limiter.acquire().await.expect("failed to acquire semaphore");
+    debug!("Semaphore: Acquired token");
     token.forget();
     let backend = params.backend.clone();
     let model = params.model.clone();
@@ -320,6 +321,7 @@ async fn request_completion(
             .headers(headers)
             .send().await;
         limiter.add_permits(1);
+        debug!("Semaphore: Recovered permit");
         res
     }).await??;
 
