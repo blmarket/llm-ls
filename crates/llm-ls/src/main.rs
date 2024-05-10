@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use tokenizers::Tokenizer;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -193,6 +193,7 @@ struct LlmService {
     document_map: Arc<RwLock<HashMap<String, Document>>>,
     http_client: reqwest::Client,
     unsafe_http_client: reqwest::Client,
+    limiter: Arc<Semaphore>,
     workspace_folders: Arc<RwLock<Option<Vec<WorkspaceFolder>>>>,
     tokenizer_map: Arc<RwLock<HashMap<String, Arc<Tokenizer>>>>,
     unauthenticated_warn_at: Arc<RwLock<Instant>>,
@@ -294,11 +295,11 @@ fn build_prompt(
 
 async fn request_completion(
     http_client: &reqwest::Client,
+    limiter: Arc<Semaphore>,
     prompt: String,
     params: &GetCompletionsParams,
 ) -> Result<Vec<Generation>> {
     let t = Instant::now();
-
     let json = build_body(
         &params.backend,
         params.model.clone(),
@@ -306,12 +307,21 @@ async fn request_completion(
         params.request_body.clone(),
     );
     let headers = build_headers(&params.backend, params.api_token.as_ref(), params.ide)?;
-    let res = http_client
-        .post(build_url(params.backend.clone(), &params.model))
-        .json(&json)
-        .headers(headers)
-        .send()
-        .await?;
+
+    let token = limiter.acquire().await.expect("failed to acquire semaphore");
+    token.forget();
+    let backend = params.backend.clone();
+    let model = params.model.clone();
+    let client = http_client.clone();
+    let res = tokio::spawn(async move {
+        let res = client 
+            .post(build_url(backend, &model))
+            .json(&json)
+            .headers(headers)
+            .send().await;
+        limiter.add_permits(1);
+        res
+    }).await??;
 
     let model = &params.model;
     let generations = parse_generations(&params.backend, res.text().await?.as_str())?;
@@ -549,6 +559,7 @@ impl LlmService {
             };
             let result = request_completion(
                 http_client,
+                self.limiter.clone(),
                 prompt,
                 &params,
             )
@@ -738,6 +749,7 @@ async fn async_main() {
         document_map: Arc::new(RwLock::new(HashMap::new())),
         http_client,
         unsafe_http_client,
+        limiter: Arc::new(Semaphore::new(1)),
         workspace_folders: Arc::new(RwLock::new(None)),
         tokenizer_map: Arc::new(RwLock::new(HashMap::new())),
         unauthenticated_warn_at: Arc::new(RwLock::new(
