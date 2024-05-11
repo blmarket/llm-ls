@@ -32,6 +32,8 @@ mod backend;
 mod document;
 mod error;
 mod language_id;
+#[cfg(test)]
+mod test_fixtures;
 
 const MAX_WARNING_REPEAT: Duration = Duration::from_secs(3_600);
 pub const NAME: &str = "llm-ls";
@@ -804,18 +806,23 @@ mod tests {
     use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
     use custom_types::llm_ls::{Backend, FimParams, GetCompletionsParams, Ide};
-    use llm_daemon::{daemon_ext::llama_config_map, LlamaConfigs, LlamaDaemon, LlmConfig as _, LlmDaemon};
+    use futures::{future::abortable, FutureExt, TryFutureExt};
+    use llm_daemon::{
+        daemon_ext::llama_config_map, LlamaConfigs, LlamaDaemon, LlmConfig as _, LlmDaemon,
+    };
     use serde_json::Map;
-    use tokio::sync::Semaphore;
+    use tokio::{sync::Semaphore, task::JoinSet};
     use tower_lsp::lsp_types::{Position, TextDocumentIdentifier, TextDocumentPositionParams};
     use tracing::debug;
     use tracing_test::traced_test;
+
+    use crate::test_fixtures::test_get_params;
 
     use super::request_completion;
 
     #[test]
     #[traced_test(level = "debug")]
-    fn it_works() -> anyhow::Result<()> {
+    fn single_request() -> anyhow::Result<()> {
         let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
         let daemon = LlamaDaemon::from(model_path);
         daemon.fork_daemon();
@@ -823,30 +830,30 @@ mod tests {
             url: daemon.config().endpoint().join("completions")?.into(),
         };
         let client = reqwest::Client::new();
-        let params = GetCompletionsParams {
-            api_token: None,
-            context_window: 100,
-            fim: FimParams {
-                enabled: false,
-                prefix: "".into(),
-                middle: "".into(),
-                suffix: "".into(),
-            },
-            ide: Ide::Neovim,
-            model: "model".to_string(),
-            backend,
-            text_document_position: TextDocumentPositionParams {
-                position: Position {
-                    line: 0,
-                    character: 0,
-                },
-                text_document: TextDocumentIdentifier { uri: reqwest::Url::parse("file:///").unwrap() },
-            },
-            tls_skip_verify_insecure: false,
-            tokens_to_clear: vec![],
-            tokenizer_config: None,
-            request_body: Map::new(),
+        let params = test_get_params(backend);
+        debug!("creating a runtime");
+        let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+        runtime.spawn(daemon.heartbeat());
+        let limiter = Arc::new(Semaphore::new(1));
+        runtime.block_on(async {
+            daemon.ready().await;
+            let f1 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
+            dbg!(f1.await?);
+            Ok(())
+        })
+    }
+
+    #[test]
+    #[traced_test(level = "debug")]
+    fn multiple_requests() -> anyhow::Result<()> {
+        let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
+        let daemon = LlamaDaemon::from(model_path);
+        daemon.fork_daemon();
+        let backend = Backend::Ollama {
+            url: daemon.config().endpoint().join("completions")?.into(),
         };
+        let client = reqwest::Client::new();
+        let params = test_get_params(backend);
         debug!("creating a runtime");
         let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
         runtime.spawn(daemon.heartbeat());
@@ -858,6 +865,73 @@ mod tests {
             let f3 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
             let f4 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
             let f5 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
+            let (r1, r2, r3, r4, r5) = tokio::join!(f1, f2, f3, f4, f5);
+            dbg!(r1, r2, r3, r4, r5);
+            Ok(())
+        })
+    }
+
+    #[test]
+    #[traced_test(level = "debug")]
+    fn multiple_requests_with_cancellation() -> anyhow::Result<()> {
+        let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
+        let daemon = LlamaDaemon::from(model_path);
+        daemon.fork_daemon();
+        let backend = Backend::Ollama {
+            url: daemon.config().endpoint().join("completions")?.into(),
+        };
+        let client = reqwest::Client::new();
+        let params = test_get_params(backend);
+        debug!("creating a runtime");
+        let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+        runtime.spawn(daemon.heartbeat());
+        let limiter = Arc::new(Semaphore::new(1));
+        runtime.block_on(async {
+            daemon.ready().await;
+            let c1 = client.clone();
+            let p1 = params.clone();
+            let l1 = limiter.clone();
+            let f1 =
+                abortable(
+                    async move { request_completion(&c1, l1, "hello".to_string(), &p1).await },
+                );
+            let (t1, _) = f1;
+            let s1 = tokio::spawn(t1);
+
+            let c2 = client.clone();
+            let p2 = params.clone();
+            let l2 = limiter.clone();
+            let f2 =
+                abortable(
+                    async move { request_completion(&c2, l2, "hello".to_string(), &p2).await },
+                );
+            let (t2, h2) = f2;
+            let s2 = tokio::spawn(t2);
+
+            let c3 = client.clone();
+            let p3 = params.clone();
+            let l3 = limiter.clone();
+            let f3 =
+                abortable(
+                    async move { request_completion(&c3, l3, "hello".to_string(), &p3).await },
+                );
+            let (t3, h3) = f3;
+            let s3 = tokio::spawn(t3);
+
+            tokio::select! {
+                _ = s1 => {
+                    h2.abort(); // h2 already took the semaphore.
+                    h3.abort();
+                },
+            }
+            // FIXME: Currently test is being flaky here.
+            // quite sure s3 will be aborted, but s2 can be cancelled or not randomly.
+            assert_eq!(limiter.available_permits(), 0);
+
+            dbg!(s2.await);
+            dbg!(s3.await);
+
+            assert_eq!(limiter.available_permits(), 1);
             Ok(())
         })
     }
