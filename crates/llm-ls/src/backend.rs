@@ -3,6 +3,7 @@ use custom_types::llm_ls::{Backend, Ide};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use tracing::trace;
 use std::fmt::Display;
 
 use crate::{
@@ -209,6 +210,7 @@ pub(crate) fn build_headers(
 }
 
 pub(crate) fn parse_generations(backend: &Backend, text: &str) -> Result<Vec<Generation>> {
+    trace!("parse_generations: {text}");
     match backend {
         Backend::HuggingFace { .. } => parse_api_text(text),
         Backend::Ollama { .. } => parse_ollama_text(text),

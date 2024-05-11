@@ -814,13 +814,13 @@ mod tests {
     use super::request_completion;
 
     #[test]
-    #[traced_test]
-    fn it_works() {
+    #[traced_test(level = "debug")]
+    fn it_works() -> anyhow::Result<()> {
         let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
         let daemon = LlamaDaemon::from(model_path);
         daemon.fork_daemon();
         let backend = Backend::Ollama {
-            url: daemon.config().endpoint().into(),
+            url: daemon.config().endpoint().join("completions")?.into(),
         };
         let client = reqwest::Client::new();
         let params = GetCompletionsParams {
@@ -851,14 +851,14 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
         runtime.spawn(daemon.heartbeat());
         let limiter = Arc::new(Semaphore::new(1));
-        let handle: anyhow::Result<()> = runtime.block_on(async {
+        runtime.block_on(async {
             daemon.ready().await;
-            dbg!(request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?);
-            dbg!(request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?);
-            dbg!(request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?);
-            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
-            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
+            let f1 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
+            let f2 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
+            let f3 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
+            let f4 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
+            let f5 = request_completion(&client, limiter.clone(), "hello".to_string(), &params);
             Ok(())
-        });
+        })
     }
 }
