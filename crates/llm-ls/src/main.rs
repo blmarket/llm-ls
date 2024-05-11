@@ -4,6 +4,7 @@ use custom_types::llm_ls::{
     GetCompletionsResult, Ide, RejectCompletionParams, TokenizerConfig,
 };
 use llm_daemon::{LlamaDaemon, LlmDaemon};
+use reqwest::Response;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,6 +32,7 @@ mod backend;
 mod document;
 mod error;
 mod language_id;
+mod proxy;
 
 const MAX_WARNING_REPEAT: Duration = Duration::from_secs(3_600);
 pub const NAME: &str = "llm-ls";
@@ -308,22 +310,21 @@ async fn request_completion(
     );
     let headers = build_headers(&params.backend, params.api_token.as_ref(), params.ide)?;
 
-    let token = limiter.acquire().await.expect("failed to acquire semaphore");
+    let token = limiter
+        .acquire()
+        .await
+        .expect("failed to acquire semaphore");
     debug!("Semaphore: Acquired token");
     token.forget();
-    let backend = params.backend.clone();
-    let model = params.model.clone();
+    let url = build_url(params.backend.clone(), &params.model);
     let client = http_client.clone();
     let res = tokio::spawn(async move {
-        let res = client 
-            .post(build_url(backend, &model))
-            .json(&json)
-            .headers(headers)
-            .send().await;
+        let res = client.post(url).json(&json).headers(headers).send().await;
         limiter.add_permits(1);
         debug!("Semaphore: Recovered permit");
         res
-    }).await??;
+    })
+    .await??;
 
     let model = &params.model;
     let generations = parse_generations(&params.backend, res.text().await?.as_str())?;
@@ -796,4 +797,70 @@ fn main() {
     let handle = runtime.spawn(daemon.heartbeat());
     runtime.block_on(async_main());
     handle.abort();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, path::PathBuf, sync::Arc};
+
+    use custom_types::llm_ls::{Backend, FimParams, GetCompletionsParams, Ide};
+    use llm_daemon::{daemon_ext::llama_config_map, LlamaConfigs, LlamaDaemon, LlmConfig as _, LlmDaemon};
+    use serde_json::Map;
+    use tokio::sync::Semaphore;
+    use tower_lsp::lsp_types::{Position, TextDocumentIdentifier, TextDocumentPositionParams};
+    use tracing::debug;
+    use tracing_test::traced_test;
+
+    use super::request_completion;
+
+    #[test]
+    #[traced_test]
+    fn it_works() {
+        let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
+        let daemon = LlamaDaemon::from(model_path);
+        daemon.fork_daemon();
+        let backend = Backend::Ollama {
+            url: daemon.config().endpoint().into(),
+        };
+        let client = reqwest::Client::new();
+        let params = GetCompletionsParams {
+            api_token: None,
+            context_window: 100,
+            fim: FimParams {
+                enabled: false,
+                prefix: "".into(),
+                middle: "".into(),
+                suffix: "".into(),
+            },
+            ide: Ide::Neovim,
+            model: "model".to_string(),
+            backend,
+            text_document_position: TextDocumentPositionParams {
+                position: Position {
+                    line: 0,
+                    character: 0,
+                },
+                text_document: TextDocumentIdentifier { uri: reqwest::Url::parse("file:///").unwrap() },
+            },
+            tls_skip_verify_insecure: false,
+            tokens_to_clear: vec![],
+            tokenizer_config: None,
+            request_body: Map::new(),
+        };
+        debug!("creating a runtime");
+        let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+        runtime.block_on(daemon.heartbeat());
+        let limiter = Arc::new(Semaphore::new(1));
+        let handle: anyhow::Result<()> = runtime.block_on(async {
+            debug!("waiting for daemon to be ready");
+            daemon.ready().await;
+            debug!("now it's ready");
+            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
+            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
+            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
+            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
+            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
+            Ok(())
+        });
+    }
 }

@@ -61,3 +61,8 @@ tree-sitter-typescript = "0.20"
 [dependencies.uuid]
 version = "1.4"
 features = ["v4", "fast-rng", "serde"]
+
+[dev-dependencies]
+anyhow = "1"
+futures = "0.3"
+tracing-test = "0.2"
