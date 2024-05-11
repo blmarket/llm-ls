@@ -19,7 +19,7 @@ use tokio::sync::{RwLock, Semaphore};
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use tracing_appender::rolling;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -32,7 +32,6 @@ mod backend;
 mod document;
 mod error;
 mod language_id;
-mod proxy;
 
 const MAX_WARNING_REPEAT: Duration = Duration::from_secs(3_600);
 pub const NAME: &str = "llm-ls";
@@ -301,6 +300,7 @@ async fn request_completion(
     prompt: String,
     params: &GetCompletionsParams,
 ) -> Result<Vec<Generation>> {
+    trace!("here");
     let t = Instant::now();
     let json = build_body(
         &params.backend,
@@ -849,15 +849,13 @@ mod tests {
         };
         debug!("creating a runtime");
         let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
-        runtime.block_on(daemon.heartbeat());
+        runtime.spawn(daemon.heartbeat());
         let limiter = Arc::new(Semaphore::new(1));
         let handle: anyhow::Result<()> = runtime.block_on(async {
-            debug!("waiting for daemon to be ready");
             daemon.ready().await;
-            debug!("now it's ready");
-            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
-            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
-            request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
+            dbg!(request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?);
+            dbg!(request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?);
+            dbg!(request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?);
             request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
             request_completion(&client, limiter.clone(), "hello".to_string(), &params).await?;
             Ok(())
