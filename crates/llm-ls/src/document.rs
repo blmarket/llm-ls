@@ -10,120 +10,105 @@ fn get_parser(language_id: LanguageId) -> Result<Parser> {
     match language_id {
         LanguageId::Bash => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_bash::language())?;
+            parser.set_language(&tree_sitter_bash::language())?;
             Ok(parser)
         }
         LanguageId::C => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_c::language())?;
+            parser.set_language(&tree_sitter_c::language())?;
             Ok(parser)
         }
         LanguageId::Cpp => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_cpp::language())?;
+            parser.set_language(&tree_sitter_cpp::language())?;
             Ok(parser)
         }
         LanguageId::CSharp => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_c_sharp::language())?;
+            parser.set_language(&tree_sitter_c_sharp::language())?;
             Ok(parser)
         }
         LanguageId::Elixir => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_elixir::language())?;
+            parser.set_language(&tree_sitter_elixir::language())?;
             Ok(parser)
         }
         LanguageId::Erlang => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_erlang::language())?;
+            parser.set_language(&tree_sitter_erlang::language())?;
             Ok(parser)
         }
         LanguageId::Go => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_go::language())?;
+            parser.set_language(&tree_sitter_go::language())?;
             Ok(parser)
         }
         LanguageId::Html => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_html::language())?;
+            parser.set_language(&tree_sitter_html::language())?;
             Ok(parser)
         }
         LanguageId::Java => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_java::language())?;
+            parser.set_language(&tree_sitter_java::language())?;
             Ok(parser)
         }
         LanguageId::JavaScript | LanguageId::JavaScriptReact => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_javascript::language())?;
+            parser.set_language(&tree_sitter_javascript::language())?;
             Ok(parser)
         }
         LanguageId::Json => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_json::language())?;
+            parser.set_language(&tree_sitter_json::language())?;
             Ok(parser)
         }
         LanguageId::Kotlin => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_kotlin::language())?;
+            parser.set_language(&tree_sitter_kotlin::language())?;
             Ok(parser)
         }
         LanguageId::Lua => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_lua::language())?;
+            parser.set_language(&tree_sitter_lua::language())?;
             Ok(parser)
         }
         LanguageId::Markdown => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_md::language())?;
-            Ok(parser)
-        }
-        LanguageId::ObjectiveC => {
-            let mut parser = Parser::new();
-            parser.set_language(tree_sitter_objc::language())?;
+            parser.set_language(&tree_sitter_md::language())?;
             Ok(parser)
         }
         LanguageId::Python => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_python::language())?;
-            Ok(parser)
-        }
-        LanguageId::R => {
-            let mut parser = Parser::new();
-            parser.set_language(tree_sitter_r::language())?;
+            parser.set_language(&tree_sitter_python::language())?;
             Ok(parser)
         }
         LanguageId::Ruby => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_ruby::language())?;
+            parser.set_language(&tree_sitter_ruby::language())?;
             Ok(parser)
         }
         LanguageId::Rust => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_rust::language())?;
-            Ok(parser)
-        }
-        LanguageId::Scala => {
-            let mut parser = Parser::new();
-            parser.set_language(tree_sitter_scala::language())?;
+            parser.set_language(&tree_sitter_rust::language())?;
             Ok(parser)
         }
         LanguageId::Swift => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_swift::language())?;
+            parser.set_language(&tree_sitter_swift::language())?;
             Ok(parser)
         }
         LanguageId::TypeScript => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_typescript::language_typescript())?;
+            parser.set_language(&tree_sitter_typescript::language_typescript())?;
             Ok(parser)
         }
         LanguageId::TypeScriptReact => {
             let mut parser = Parser::new();
-            parser.set_language(tree_sitter_typescript::language_tsx())?;
+            parser.set_language(&tree_sitter_typescript::language_tsx())?;
             Ok(parser)
         }
-        LanguageId::Unknown => Ok(Parser::new()),
+        _ => Ok(Parser::new()),
     }
 }
 

@@ -296,10 +296,10 @@ fn build_prompt(
 }
 
 async fn request_completion(
-    http_client: &reqwest::Client,
+    http_client: reqwest::Client,
     limiter: Arc<Semaphore>,
     prompt: String,
-    params: &GetCompletionsParams,
+    params: GetCompletionsParams,
 ) -> Result<Vec<Generation>> {
     let t = Instant::now();
     let json = build_body(
@@ -310,25 +310,19 @@ async fn request_completion(
     );
     let headers = build_headers(&params.backend, params.api_token.as_ref(), params.ide)?;
 
-    let token = limiter.acquire().await.expect("failed to acquire semaphore");
-    debug!("Semaphore: Acquired token");
-    token.forget();
-    let backend = params.backend.clone();
-    let model = params.model.clone();
+    let url = build_url(params.backend.clone(), &params.model);
     let client = http_client.clone();
-    let res = tokio::spawn(async move {
-        let res = client 
-            .post(build_url(backend, &model))
-            .json(&json)
-            .headers(headers)
-            .send().await;
-        limiter.add_permits(1);
-        debug!("Semaphore: Recovered permit");
-        res
-    }).await??;
-
+    debug!("Semaphore: Acquiring a permit: {:?}", t);
+    let permit = limiter
+        .acquire_owned()
+        .await
+        .expect("failed to acquire semaphore");
+    debug!("Semaphore: Acquired permit: {:?}", t);
+    let res = client.post(url).json(&json).headers(headers).send().await?;
     let model = &params.model;
     let generations = parse_generations(&params.backend, res.text().await?.as_str())?;
+    drop(permit);
+    debug!("Semaphore: Recovered permit: {:?}", t);
     let time = t.elapsed().as_millis();
     info!(
         model,
@@ -562,10 +556,10 @@ impl LlmService {
                 &self.http_client
             };
             let result = request_completion(
-                http_client,
+                http_client.clone(),
                 self.limiter.clone(),
                 prompt,
-                &params,
+                params.clone(),
             )
             .await?;
 
@@ -798,4 +792,207 @@ fn main() {
     let handle = runtime.spawn(daemon.heartbeat());
     runtime.block_on(async_main());
     handle.abort();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::PathBuf, sync::Arc, time::Duration};
+
+    use custom_types::llm_ls::Backend;
+    use futures::future::abortable;
+    use llm_daemon::{LlamaDaemon, LlmConfig as _, LlmDaemon as _};
+    use tokio::sync::Semaphore;
+    use tracing::debug;
+    use tracing_test::traced_test;
+
+    use crate::test_fixtures::test_get_params;
+
+    use super::request_completion;
+
+    #[test]
+    #[traced_test(level = "debug")]
+    fn single_request() -> anyhow::Result<()> {
+        let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
+        let daemon = LlamaDaemon::from(model_path);
+        daemon.fork_daemon()?;
+        let backend = Backend::Ollama {
+            url: daemon.config().endpoint().join("completions")?.into(),
+        };
+        let client = reqwest::Client::new();
+        let params = test_get_params(backend);
+        debug!("creating a runtime");
+        let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+        runtime.spawn(daemon.heartbeat());
+        let limiter = Arc::new(Semaphore::new(1));
+        runtime.block_on(async {
+            daemon.ready().await;
+            let f1 = request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            );
+            dbg!(f1.await?);
+            Ok(())
+        })
+    }
+
+    #[test]
+    #[traced_test(level = "debug")]
+    fn multiple_requests() -> anyhow::Result<()> {
+        let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
+        let daemon = LlamaDaemon::from(model_path);
+        daemon.fork_daemon()?;
+        let backend = Backend::Ollama {
+            url: daemon.config().endpoint().join("completions")?.into(),
+        };
+        let client = reqwest::Client::new();
+        let params = test_get_params(backend);
+        debug!("creating a runtime");
+        let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+        runtime.spawn(daemon.heartbeat());
+        let limiter = Arc::new(Semaphore::new(1));
+        runtime.block_on(async {
+            daemon.ready().await;
+            let f1 = request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            );
+            let f2 = request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            );
+            let f3 = request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            );
+            let f4 = request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            );
+            let f5 = request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            );
+            let (r1, r2, r3, r4, r5) = tokio::join!(f1, f2, f3, f4, f5);
+            dbg!(r1?, r2?, r3?, r4?, r5?);
+            Ok(())
+        })
+    }
+
+    #[test]
+    #[traced_test]
+    fn multiple_requests_with_cancellation() -> anyhow::Result<()> {
+        let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
+        let daemon = LlamaDaemon::from(model_path);
+        daemon.fork_daemon()?;
+        let backend = Backend::Ollama {
+            url: daemon.config().endpoint().join("completions")?.into(),
+        };
+        let client = reqwest::Client::new();
+        let params = test_get_params(backend);
+        let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+        runtime.spawn(daemon.heartbeat());
+        let limiter = Arc::new(Semaphore::new(1));
+        runtime.block_on(async {
+            daemon.ready().await;
+            let c1 = client.clone();
+            let p1 = params.clone();
+            let l1 = limiter.clone();
+            let f1 =
+                abortable(async move { request_completion(c1, l1, "hello".to_string(), p1).await });
+            let (t1, _) = f1;
+            let s1 = tokio::spawn(t1);
+
+            let c2 = client.clone();
+            let p2 = params.clone();
+            let l2 = limiter.clone();
+            let f2 =
+                abortable(async move { request_completion(c2, l2, "hello".to_string(), p2).await });
+            let (t2, h2) = f2;
+            let s2 = tokio::spawn(t2);
+
+            let c3 = client.clone();
+            let p3 = params.clone();
+            let l3 = limiter.clone();
+            let f3 =
+                abortable(async move { request_completion(c3, l3, "hello".to_string(), p3).await });
+            let (t3, h3) = f3;
+            let s3 = tokio::spawn(t3);
+
+            tokio::select! {
+                _ = s1 => {
+                    h2.abort(); // h2 might took the semaphore... or not?
+                    h3.abort();
+                },
+            }
+            // Everything is possible - 0~2 got a permit and finished evaluation.
+            // or aborted while waiting for a permit
+            // or got a permit, but cancelled during the request.
+            let _ = s2.await;
+            let _ = s3.await;
+        });
+        runtime.shutdown_timeout(Duration::from_secs(1));
+
+        assert_eq!(limiter.available_permits(), 1);
+        Ok(())
+    }
+
+    #[test]
+    #[traced_test]
+    fn multiple_concurrent_requests() -> anyhow::Result<()> {
+        let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
+        let daemon = LlamaDaemon::from(model_path);
+        daemon.fork_daemon()?;
+        let backend = Backend::Ollama {
+            url: daemon.config().endpoint().join("completions")?.into(),
+        };
+        let client = reqwest::Client::new();
+        let params = test_get_params(backend);
+        let runtime = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+        runtime.spawn(daemon.heartbeat());
+        let limiter = Arc::new(Semaphore::new(1));
+        let lim2 = limiter.clone();
+        runtime.block_on(async move {
+            daemon.ready().await;
+            let t1 = tokio::spawn(request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            ));
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            t1.abort();
+            let t2 = tokio::spawn(request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            ));
+            t2.abort();
+            let t3 = tokio::spawn(request_completion(
+                client.clone(),
+                limiter.clone(),
+                "hello".to_string(),
+                params.clone(),
+            ));
+            dbg!(t1.await);
+            dbg!(t2.await);
+            dbg!(t3.await);
+        });
+        runtime.shutdown_timeout(Duration::from_secs(1));
+
+        assert_eq!(lim2.available_permits(), 1);
+        Ok(())
+    }
 }
