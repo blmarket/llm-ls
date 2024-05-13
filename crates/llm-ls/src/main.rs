@@ -31,6 +31,8 @@ mod backend;
 mod document;
 mod error;
 mod language_id;
+#[cfg(test)]
+mod test_fixtures;
 
 const MAX_WARNING_REPEAT: Duration = Duration::from_secs(3_600);
 pub const NAME: &str = "llm-ls";
