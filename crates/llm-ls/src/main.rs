@@ -378,6 +378,7 @@ async fn download_tokenizer_file(
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(to)
         .await?;
     let http_client = http_client.clone();
@@ -950,6 +951,7 @@ mod tests {
 
     #[test]
     #[traced_test]
+    #[allow(unused_must_use)] // Intentionally keep dbg!(....await). meaning of the test is to check semaphore count after the runtime.
     fn multiple_concurrent_requests() -> anyhow::Result<()> {
         let model_path = PathBuf::from(std::env!("HOME")).join("proj/codegemma-7b-Q8.gguf");
         let daemon = LlamaDaemon::from(model_path);
